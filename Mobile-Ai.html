@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AI ตาสับปะรด (จับวัตถุภาษาไทย)</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; background: #1a1a1a; color: white; overflow: hidden; display: flex; flex-direction: column; align-items: center; }
+        #header { padding: 15px; text-align: center; z-index: 10; background: rgba(0,0,0,0.8); width: 100%; box-shadow: 0 2px 10px rgba(0,0,0,0.5); }
+        .video-wrapper { position: relative; width: 100vw; height: 75vh; display: flex; justify-content: center; background: #000; }
+        video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
+        #controls { padding: 15px; z-index: 10; display: flex; flex-direction: column; align-items: center; gap: 10px; width: 100%; }
+        button { padding: 12px 25px; font-size: 16px; border-radius: 30px; border: none; background: #4CAF50; color: white; font-weight: bold; cursor: pointer; transition: 0.3s; }
+        button:active { transform: scale(0.95); background: #388E3C; }
+        #status { font-size: 13px; color: #00ff00; margin-top: 5px; font-weight: bold; }
+        .info-panel { font-size: 12px; color: #ccc; text-align: center; margin-top: 5px; }
+    </style>
+</head>
+<body>
+
+    <div id="header">
+        <strong>สมองกลน้องนำทาง: ระบบระบุวัตถุ</strong>
+        <div id="status">กำลังเริ่มต้นสมองกล...</div>
+    </div>
+
+    <div class="video-wrapper">
+        <video id="webcam" autoplay muted playsinline></video>
+        <canvas id="canvas"></canvas>
+    </div>
+
+    <div id="controls">
+        <button onclick="switchCamera()">🔄 สลับกล้องหน้า/หลัง</button>
+        <div class="info-panel">ลองส่องไปที่ คน, มือถือ, แก้วน้ำ หรือ เก้าอี้ ดูนะคะ</div>
+    </div>
+
+    <script>
+        const video = document.getElementById('webcam');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const statusText = document.getElementById('status');
+        
+        let model = undefined;
+        let currentFacingMode = "user"; 
+
+        // 1. คลังคำแปลภาษาไทย (Dictionary)
+        const thLabels = {
+            "person": "คน",
+            "bicycle": "จักรยาน",
+            "car": "รถยนต์",
+            "motorcycle": "รถจักรยานยนต์",
+            "airplane": "เครื่องบิน",
+            "bus": "รถเมล์",
+            "train": "รถไฟ",
+            "truck": "รถบรรทุก",
+            "boat": "เรือ",
+            "bench": "ม้านั่ง",
+            "bird": "นก",
+            "cat": "แมว",
+            "dog": "สุนัข",
+            "horse": "ม้า",
+            "sheep": "แกะ",
+            "cow": "วัว",
+            "elephant": "ช้าง",
+            "bear": "หมี",
+            "zebra": "ม้าลาย",
+            "giraffe": "ยีราฟ",
+            "backpack": "เป้สะพายหลัง",
+            "umbrella": "ร่ม",
+            "handbag": "กระเป๋าถือ",
+            "tie": "เนกไท",
+            "suitcase": "กระเป๋าเดินทาง",
+            "frisbee": "จานร่อน",
+            "skis": "สกี",
+            "snowboard": "สโนว์บอร์ด",
+            "sports ball": "ลูกบอล",
+            "kite": "ว่าว",
+            "baseball bat": "ไม้เบสบอล",
+            "baseball glove": "ถุงมือเบสบอล",
+            "skateboard": "สเก็ตบอร์ด",
+            "surfboard": "กระดานโต้คลื่น",
+            "tennis racket": "ไม้เทนนิส",
+            "bottle": "ขวดน้ำ",
+            "wine glass": "แก้วไวน์",
+            "cup": "แก้วน้ำ",
+            "fork": "ส้อม",
+            "knife": "มีด",
+            "spoon": "ช้อน",
+            "bowl": "ชาม",
+            "banana": "กล้วย",
+            "apple": "แอปเปิ้ล",
+            "sandwich": "แซนวิช",
+            "orange": "ส้ม",
+            "broccoli": "บรอกโคลี",
+            "carrot": "แครอท",
+            "hot dog": "ฮอทดอก",
+            "pizza": "พิซซ่า",
+            "donut": "โดนัท",
+            "cake": "เค้ก",
+            "chair": "เก้าอี้",
+            "couch": "โซฟา",
+            "potted plant": "กระถางต้นไม้",
+            "bed": "เตียงนอน",
+            "dining table": "โต๊ะกินข้าว",
+            "toilet": "ชักโครก",
+            "tv": "ทีวี",
+            "laptop": "แล็ปท็อป",
+            "mouse": "เมาส์",
+            "remote": "รีโมท",
+            "keyboard": "คีย์บอร์ด",
+            "cell phone": "มือถือ",
+            "microwave": "ไมโครเวฟ",
+            "oven": "เตาอบ",
+            "toaster": "เครื่องปิ้งขนมปัง",
+            "sink": "ซิงค์ล้างจาน",
+            "refrigerator": "ตู้เย็น",
+            "book": "หนังสือ",
+            "clock": "นาฬิกา",
+            "vase": "แจกัน",
+            "scissors": "กรรไกร",
+            "teddy bear": "ตุ๊กตาหมี",
+            "hair drier": "ไดร์เป่าผม",
+            "toothbrush": "แปรงสีฟัน"
+        };
+
+        // 2. โหลดโมเดล
+        cocoSsd.load().then(loadedModel => {
+            model = loadedModel;
+            statusText.innerText = "สมองกลพร้อมใช้งานแล้ว!";
+            startCamera();
+        });
+
+        // 3. ฟังก์ชันเปิดกล้อง
+        async function startCamera() {
+            if (video.srcObject) {
+                video.srcObject.getTracks().forEach(track => track.stop());
+            }
+
+            const constraints = {
+                video: { facingMode: currentFacingMode }
+            };
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                video.srcObject = stream;
+                video.onloadedmetadata = () => {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    predictFrame();
+                };
+            } catch (err) {
+                statusText.innerText = "เข้าถึงกล้องไม่ได้: " + err.message;
+            }
+        }
+
+        function switchCamera() {
+            currentFacingMode = (currentFacingMode === "user") ? "environment" : "user";
+            startCamera();
+        }
+
+        // 4. วิเคราะห์ภาพและวาดผลลัพธ์
+        async function predictFrame() {
+            if (!model) return;
+
+            const predictions = await model.detect(video);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            predictions.forEach(prediction => {
+                if (prediction.score > 0.5) {
+                    const [x, y, width, height] = prediction.bbox;
+                    
+                    // แปลชื่อเป็นไทย ถ้าไม่มีในฐานข้อมูลให้ใช้ทับศัพท์ภาษาอังกฤษ
+                    const labelTH = thLabels[prediction.class] || prediction.class;
+                    const confidence = Math.round(prediction.score * 100);
+
+                    // วาดกรอบสี่เหลี่ยม (สีนีออน)
+                    ctx.strokeStyle = '#00FF41';
+                    ctx.lineWidth = 5;
+                    ctx.strokeRect(x, y, width, height);
+
+                    // วาดพื้นหลังข้อความ
+                    ctx.fillStyle = 'rgba(0, 255, 65, 0.7)';
+                    const textWidth = ctx.measureText(`${labelTH} ${confidence}%`).width;
+                    ctx.fillRect(x, y > 40 ? y - 40 : y, textWidth + 20, 40);
+
+                    // วาดข้อความภาษาไทย
+                    ctx.fillStyle = '#000';
+                    ctx.font = 'bold 24px sans-serif';
+                    ctx.fillText(`${labelTH} ${confidence}%`, x + 10, y > 40 ? y - 10 : y + 30);
+                }
+            });
+
+            requestAnimationFrame(predictFrame);
+        }
+    </script>
+</body>
+</html>
