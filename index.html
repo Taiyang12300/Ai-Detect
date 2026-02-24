@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>AI ตาสับปะรด (ฉบับพูดได้)</title>
+    <title>AI ตาสับปะรด (ฉบับเสถียร)</title>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
     <style>
@@ -14,7 +14,7 @@
         canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
         #controls { padding: 20px; display: flex; flex-direction: column; align-items: center; gap: 10px; width: 100%; }
         button { padding: 15px 30px; font-size: 18px; border-radius: 50px; border: none; background: #4CAF50; color: white; font-weight: bold; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.3); width: 80%; max-width: 300px; }
-        #switchBtn { background: #2196F3; display: none; }
+        #switchBtn { background: #2196F3; display: none; } /* ซ่อนไว้ก่อนจนกว่าจะเริ่ม */
         #status { font-size: 14px; color: #00ff00; margin-top: 5px; text-align: center; padding: 0 10px; }
         .loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); display: flex; justify-content: center; align-items: center; z-index: 100; flex-direction: column; }
     </style>
@@ -23,7 +23,7 @@
 
     <div id="loadingScreen" class="loading-overlay">
         <h2 id="loadText">กำลังดาวน์โหลดสมองกล AI...</h2>
-        <p>กรุณารอสักครู่ (ประมาณ 10-20 วิตาที)</p>
+        <p>กรุณารอสักครู่ (ประมาณ 10-20 วินาที)</p>
     </div>
 
     <div id="header">
@@ -37,7 +37,7 @@
     </div>
 
     <div id="controls">
-        <button id="startBtn">▶️ เริ่มเปิดกล้องและระบบเสียง</button>
+        <button id="startBtn">▶️ เริ่มเปิดกล้อง</button>
         <button id="switchBtn">🔄 สลับกล้องหน้า/หลัง</button>
     </div>
 
@@ -52,41 +52,81 @@
         
         let model = undefined;
         let currentFacingMode = "user"; 
-        let isSpeaking = false; // ตัวแปรเช็คว่ากำลังพูดอยู่ไหม
 
         const thLabels = {
-            "person": "คน", 
-            "cell phone": "มือถือ", 
-            "cup": "แก้วน้ำ", 
-            "bottle": "ขวดน้ำ",
-            "chair": "เก้าอี้", 
-            "tv": "ทีวี", 
-            "laptop": "แล็ปท็อป", 
-            "car": "รถยนต์",
-            "motorcycle": "มอเตอร์ไซค์", 
-            "dog": "สุนัข", 
-            "cat": "แมว",
-            "teddy bear": "ตุ๊กตา" // เพิ่มคำแปลตุ๊กตา
+            "person": "คน", "cell phone": "มือถือ", "cup": "แก้วน้ำ", "bottle": "ขวดน้ำ",
+            "chair": "เก้าอี้", "tv": "ทีวี", "laptop": "แล็ปท็อป", "car": "รถยนต์",
+            "motorcycle": "มอเตอร์ไซค์", "dog": "สุนัข", "cat": "แมว", "bottle": "ขวด"
         };
 
-        // ฟังก์ชันสั่งให้พูดภาษาไทย
-        function speak(text) {
-            if (isSpeaking) return; // ถ้าพูดอยู่ ให้รอจนจบก่อน
-
-            const utterance = new SpeechSynthesisUtterance(text);
-            utterance.lang = 'th-TH';
-            utterance.rate = 1.0; 
-
-            utterance.onstart = () => { isSpeaking = true; };
-            utterance.onend = () => { isSpeaking = false; };
-
-            window.speechSynthesis.speak(utterance);
-        }
-
-        // 1. โหลดโมเดล
+        // 1. โหลดโมเดลทันทีที่เปิดเว็บ
         cocoSsd.load().then(loadedModel => {
             model = loadedModel;
-            loadingScreen.style.display = 'none';
+            loadingScreen.style.display = 'none'; // ปิดหน้าจอโหลด
             statusText.innerText = "สมองกลพร้อม! กรุณากดปุ่มเริ่ม";
         }).catch(err => {
-            document.getElementById
+            document.getElementById('loadText').innerText = "โหลดไม่สำเร็จ กรุณาเช็คอินเทอร์เน็ต";
+        });
+
+        // 2. ฟังก์ชันเปิดกล้อง
+        async function startCamera() {
+            startBtn.style.display = 'none'; // ซ่อนปุ่มเริ่ม
+            switchBtn.style.display = 'block'; // โชว์ปุ่มสลับ
+            statusText.innerText = "กำลังเข้าถึงกล้อง...";
+            
+            if (video.srcObject) {
+                video.srcObject.getTracks().forEach(track => track.stop());
+            }
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: currentFacingMode }
+                });
+                video.srcObject = stream;
+                
+                video.onloadedmetadata = () => {
+                    video.play();
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    statusText.innerText = "AI กำลังทำงาน...";
+                    predictFrame();
+                };
+            } catch (err) {
+                statusText.innerText = "เปิดกล้องไม่สำเร็จ: " + err.message;
+                startBtn.style.display = 'block';
+            }
+        }
+
+        // 3. ปุ่มกด
+        startBtn.addEventListener('click', startCamera);
+        switchBtn.addEventListener('click', () => {
+            currentFacingMode = (currentFacingMode === "user") ? "environment" : "user";
+            startCamera();
+        });
+
+        // 4. วนลูปวิเคราะห์ภาพ
+        async function predictFrame() {
+            if (!model) return;
+
+            const predictions = await model.detect(video);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            predictions.forEach(p => {
+                if (p.score > 0.5) {
+                    const [x, y, w, h] = p.bbox;
+                    const label = thLabels[p.class] || p.class;
+                    
+                    ctx.strokeStyle = '#00FF41';
+                    ctx.lineWidth = 4;
+                    ctx.strokeRect(x, y, w, h);
+
+                    ctx.fillStyle = '#00FF41';
+                    ctx.font = 'bold 20px sans-serif';
+                    ctx.fillText(`${label} ${Math.round(p.score * 100)}%`, x, y > 20 ? y - 10 : 20);
+                }
+            });
+            requestAnimationFrame(predictFrame);
+        }
+    </script>
+</body>
+</html>
