@@ -3,49 +3,32 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>AI ตาสับปะรด (ฉบับปรับปรุง)</title>
+    <title>AI ตาสับปะรด (ฉบับเสถียร)</title>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
     <style>
-        body { font-family: sans-serif; margin: 0; background: #1a1a1a; color: white; display: flex; flex-direction: column; align-items: center; }
+        body { font-family: sans-serif; margin: 0; background: #1a1a1a; color: white; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
         #header { padding: 15px; text-align: center; background: rgba(0,0,0,0.8); width: 100%; box-shadow: 0 2px 10px rgba(0,0,0,0.5); z-index: 10; }
-        
-        /* ปรับปรุงส่วนการแสดงผลวิดีโอ */
-        .video-wrapper { 
-            position: relative; 
-            width: 100vw; 
-            height: 65vh; 
-            background: #000;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            overflow: hidden;
-        }
-        video { 
-            width: 100%; 
-            height: 100%; 
-            object-fit: cover; 
-        }
-        canvas { 
-            position: absolute; 
-            top: 0; 
-            left: 0; 
-            width: 100%; 
-            height: 100%; 
-            object-fit: cover;
-            pointer-events: none; /* เพื่อให้ยังกดปุ่มสลับกล้องได้ */
-        }
-
+        .video-wrapper { position: relative; width: 100vw; height: 60vh; background: #000; display: flex; justify-content: center; align-items: center; overflow: hidden; border-bottom: 2px solid #333; }
+        video { width: 100%; height: 100%; object-fit: cover; }
+        canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
         #controls { padding: 20px; display: flex; flex-direction: column; align-items: center; gap: 10px; width: 100%; }
-        button { padding: 15px 30px; font-size: 18px; border-radius: 50px; border: none; background: #4CAF50; color: white; font-weight: bold; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.3); }
-        #status { font-size: 14px; color: #00ff00; margin-top: 5px; }
+        button { padding: 15px 30px; font-size: 18px; border-radius: 50px; border: none; background: #4CAF50; color: white; font-weight: bold; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.3); width: 80%; max-width: 300px; }
+        #switchBtn { background: #2196F3; display: none; } /* ซ่อนไว้ก่อนจนกว่าจะเริ่ม */
+        #status { font-size: 14px; color: #00ff00; margin-top: 5px; text-align: center; padding: 0 10px; }
+        .loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); display: flex; justify-content: center; align-items: center; z-index: 100; flex-direction: column; }
     </style>
 </head>
 <body>
 
+    <div id="loadingScreen" class="loading-overlay">
+        <h2 id="loadText">กำลังดาวน์โหลดสมองกล AI...</h2>
+        <p>กรุณารอสักครู่ (ประมาณ 10-20 วินาที)</p>
+    </div>
+
     <div id="header">
         <strong>สมองกลน้องนำทาง: ระบบระบุวัตถุ</strong>
-        <div id="status">กำลังโหลดสมองกล...</div>
+        <div id="status">รอโหลดโมเดล...</div>
     </div>
 
     <div class="video-wrapper">
@@ -54,8 +37,8 @@
     </div>
 
     <div id="controls">
+        <button id="startBtn">▶️ เริ่มเปิดกล้อง</button>
         <button id="switchBtn">🔄 สลับกล้องหน้า/หลัง</button>
-        <div style="font-size: 12px; color: #888;">หากจอมืด ให้ลองรีเฟรชหน้าเว็บอีกครั้งนะคะ</div>
     </div>
 
     <script>
@@ -63,7 +46,9 @@
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
         const statusText = document.getElementById('status');
+        const startBtn = document.getElementById('startBtn');
         const switchBtn = document.getElementById('switchBtn');
+        const loadingScreen = document.getElementById('loadingScreen');
         
         let model = undefined;
         let currentFacingMode = "user"; 
@@ -71,75 +56,75 @@
         const thLabels = {
             "person": "คน", "cell phone": "มือถือ", "cup": "แก้วน้ำ", "bottle": "ขวดน้ำ",
             "chair": "เก้าอี้", "tv": "ทีวี", "laptop": "แล็ปท็อป", "car": "รถยนต์",
-            "motorcycle": "มอเตอร์ไซค์", "dog": "สุนัข", "cat": "แมว"
-            // ... (สามารถเพิ่มคำแปลอื่นๆ จาก Dictionary เดิมของคุณได้ที่นี่)
+            "motorcycle": "มอเตอร์ไซค์", "dog": "สุนัข", "cat": "แมว", "bottle": "ขวด"
         };
 
-        // 1. โหลดโมเดล
+        // 1. โหลดโมเดลทันทีที่เปิดเว็บ
         cocoSsd.load().then(loadedModel => {
             model = loadedModel;
-            statusText.innerText = "สมองกลพร้อม! กำลังเปิดกล้อง...";
-            startCamera();
+            loadingScreen.style.display = 'none'; // ปิดหน้าจอโหลด
+            statusText.innerText = "สมองกลพร้อม! กรุณากดปุ่มเริ่ม";
+        }).catch(err => {
+            document.getElementById('loadText').innerText = "โหลดไม่สำเร็จ กรุณาเช็คอินเทอร์เน็ต";
         });
 
-        // 2. ฟังก์ชันเปิดกล้อง (ปรับปรุงใหม่)
+        // 2. ฟังก์ชันเปิดกล้อง
         async function startCamera() {
+            startBtn.style.display = 'none'; // ซ่อนปุ่มเริ่ม
+            switchBtn.style.display = 'block'; // โชว์ปุ่มสลับ
             statusText.innerText = "กำลังเข้าถึงกล้อง...";
             
             if (video.srcObject) {
                 video.srcObject.getTracks().forEach(track => track.stop());
             }
 
-            const constraints = {
-                video: { facingMode: currentFacingMode }
-            };
-
             try {
-                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: currentFacingMode }
+                });
                 video.srcObject = stream;
                 
-                // รอให้ Video โหลดข้อมูลภาพเสร็จก่อนเริ่ม AI
                 video.onloadedmetadata = () => {
-                    video.play(); // บังคับให้ Video เล่น
+                    video.play();
                     canvas.width = video.videoWidth;
                     canvas.height = video.videoHeight;
-                    statusText.innerText = "ระบบตรวจจับกำลังทำงาน...";
+                    statusText.innerText = "AI กำลังทำงาน...";
                     predictFrame();
                 };
             } catch (err) {
-                statusText.innerText = "เปิดกล้องไม่สำเร็จ: " + err.name;
-                console.error(err);
+                statusText.innerText = "เปิดกล้องไม่สำเร็จ: " + err.message;
+                startBtn.style.display = 'block';
             }
         }
 
-        // 3. ปุ่มสลับกล้อง
+        // 3. ปุ่มกด
+        startBtn.addEventListener('click', startCamera);
         switchBtn.addEventListener('click', () => {
             currentFacingMode = (currentFacingMode === "user") ? "environment" : "user";
             startCamera();
         });
 
-        // 4. วิเคราะห์ภาพ
+        // 4. วนลูปวิเคราะห์ภาพ
         async function predictFrame() {
             if (!model) return;
 
             const predictions = await model.detect(video);
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-            predictions.forEach(prediction => {
-                if (prediction.score > 0.5) {
-                    const [x, y, width, height] = prediction.bbox;
-                    const labelTH = thLabels[prediction.class] || prediction.class;
+            predictions.forEach(p => {
+                if (p.score > 0.5) {
+                    const [x, y, w, h] = p.bbox;
+                    const label = thLabels[p.class] || p.class;
                     
                     ctx.strokeStyle = '#00FF41';
-                    ctx.lineWidth = 5;
-                    ctx.strokeRect(x, y, width, height);
+                    ctx.lineWidth = 4;
+                    ctx.strokeRect(x, y, w, h);
 
                     ctx.fillStyle = '#00FF41';
-                    ctx.font = 'bold 24px sans-serif';
-                    ctx.fillText(`${labelTH} ${Math.round(prediction.score * 100)}%`, x, y > 20 ? y - 10 : 20);
+                    ctx.font = 'bold 20px sans-serif';
+                    ctx.fillText(`${label} ${Math.round(p.score * 100)}%`, x, y > 20 ? y - 10 : 20);
                 }
             });
-
             requestAnimationFrame(predictFrame);
         }
     </script>
