@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>AI ตาสับปะรด (ระบบทดสอบใบหน้า)</title>
+    <title>AI ตาสับปะรด (ระบบทดสอบ Landmarks)</title>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface"></script>
     <style>
@@ -23,11 +23,11 @@
 
     <div id="loadingScreen" class="loading-overlay">
         <h2 id="loadText">กำลังดาวน์โหลดสมองกล AI...</h2>
-        <p>กรุณารอสักครู่ (BlazeFace Model)</p>
+        <p>กรุณารอสักครู่ (BlazeFace Landmarks Ready)</p>
     </div>
 
     <div id="header">
-        <strong>สมองกลน้องนำทาง: ระบบทดสอบตรวจจับใบหน้า</strong>
+        <strong>สมองกลน้องนำทาง: ระบบทดสอบ ตา-จมูก-ปาก</strong>
         <div id="status">รอโหลดโมเดล...</div>
     </div>
 
@@ -50,42 +50,30 @@
         const switchBtn = document.getElementById('switchBtn');
         const loadingScreen = document.getElementById('loadingScreen');
         
-        // ใช้ window. เพื่อเลี่ยง SyntaxError ประกาศซ้ำ
         window.faceModel = undefined;
         window.currentFacingMode = "user"; 
 
-        // 1. โหลดโมเดล BlazeFace แทน COCO
         async function loadAI() {
             try {
                 window.faceModel = await blazeface.load();
                 loadingScreen.style.display = 'none';
-                statusText.innerText = "โมเดลตรวจจับใบหน้าพร้อม! กรุณากดปุ่มเริ่ม";
+                statusText.innerText = "โมเดลพร้อม! ลองยื่นหน้าเข้ามาครับ";
             } catch (err) {
-                console.error(err);
                 document.getElementById('loadText').innerText = "โหลด AI ไม่สำเร็จ";
             }
         }
         loadAI();
 
-        // 2. ฟังก์ชันเปิดกล้อง
         async function startCamera() {
             startBtn.style.display = 'none';
             switchBtn.style.display = 'block';
-            statusText.innerText = "กำลังเข้าถึงกล้อง...";
-            
-            if (video.srcObject) {
-                video.srcObject.getTracks().forEach(track => track.stop());
-            }
-
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({
                     video: { facingMode: window.currentFacingMode, width: 640, height: 480 }
                 });
                 video.srcObject = stream;
-                
                 video.onloadedmetadata = () => {
                     video.play();
-                    // ตั้งค่า Canvas ให้ตรงกับวิดีโอ
                     canvas.width = video.videoWidth;
                     canvas.height = video.videoHeight;
                     predictFrame();
@@ -101,17 +89,14 @@
             startCamera();
         });
 
-        // 3. วนลูปวิเคราะห์ใบหน้า (BlazeFace Logic)
         async function predictFrame() {
             if (!window.faceModel) return;
 
-            // ตรวจจับใบหน้า (ไม่ใช้ Tensors เพื่อประหยัด CPU)
             const predictions = await window.faceModel.estimateFaces(video, false);
-            
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
             if (predictions.length > 0) {
-                statusText.innerText = `พบใบหน้า: ${predictions.length} คน`;
+                statusText.innerText = `พบใบหน้า: ${predictions.length} คน (พิกัดครบถ้วน)`;
                 
                 predictions.forEach(prediction => {
                     const start = prediction.topLeft;
@@ -119,25 +104,34 @@
                     const size = [end[0] - start[0], end[1] - start[1]];
                     const centerX = start[0] + (size[0] / 2);
 
-                    // วาดกรอบ
-                    ctx.strokeStyle = "#00FF41";
-                    ctx.lineWidth = 4;
+                    // 1. วาดกรอบใบหน้า
+                    ctx.strokeStyle = (centerX > 100 && centerX < 540) ? "#FFD700" : "#00FF41";
+                    ctx.lineWidth = 3;
                     ctx.strokeRect(start[0], start[1], size[0], size[1]);
 
-                    // วาดข้อมูลสำหรับการ Debug (เหมือนใน Log ที่เราคุยกัน)
+                    // 2. วาดจุด Landmarks (ตา จมูก ปาก หู)
+                    const landmarks = prediction.landmarks;
+                    const colors = ["#FF3E3E", "#FF3E3E", "#FFFF00", "#3EFFFF", "#3E3EFF", "#3E3EFF"];
+                    const labels = ["Right Eye", "Left Eye", "Nose", "Mouth", "Right Ear", "Left Ear"];
+
+                    landmarks.forEach((point, index) => {
+                        ctx.fillStyle = colors[index];
+                        ctx.beginPath();
+                        ctx.arc(point[0], point[1], 4, 0, 2 * Math.PI);
+                        ctx.fill();
+                        
+                        // ใส่ชื่อกำกับจุด (เอาออกได้ถ้ามันเกะกะ)
+                        ctx.font = "10px Arial";
+                        ctx.fillText(labels[index], point[0] + 5, point[1]);
+                    });
+
+                    // 3. แสดงค่า Debug ด้านบนกรอบ
                     ctx.fillStyle = "#00FF41";
-                    ctx.font = "bold 18px sans-serif";
-                    ctx.fillText(`W: ${Math.round(size[0])} CX: ${Math.round(centerX)}`, start[0], start[1] > 20 ? start[1] - 10 : 20);
-                    
-                    // ไฮไลท์จุดกึ่งกลาง (ถ้าอยู่ในโซนทักทาย 50-270 สำหรับจอ 320px หรือเทียบเท่า)
-                    // หมายเหตุ: จอทดสอบนี้ 640px โซนทักทายจะประมาณ 100-540
-                    ctx.fillStyle = (centerX > 100 && centerX < 540) ? "yellow" : "red";
-                    ctx.beginPath();
-                    ctx.arc(centerX, start[1] + (size[1]/2), 5, 0, 2 * Math.PI);
-                    ctx.fill();
+                    ctx.font = "bold 16px sans-serif";
+                    ctx.fillText(`W: ${Math.round(size[0])} CX: ${Math.round(centerX)}`, start[0], start[1] - 10);
                 });
             } else {
-                statusText.innerText = "ไม่พบใบหน้าในขณะนี้";
+                statusText.innerText = "กำลังสแกนหาใบหน้าและอวัยวะ...";
             }
 
             requestAnimationFrame(predictFrame);
