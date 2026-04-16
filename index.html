@@ -2,140 +2,105 @@
 <html lang="th">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>AI ตาสับปะรด (ระบบทดสอบ Landmarks)</title>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI แยกเพศและวัย - น้องนำทาง</title>
+    <script defer src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js"></script>
     <style>
-        body { font-family: sans-serif; margin: 0; background: #1a1a1a; color: white; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
-        #header { padding: 15px; text-align: center; background: rgba(0,0,0,0.8); width: 100%; box-shadow: 0 2px 10px rgba(0,0,0,0.5); z-index: 10; }
-        .video-wrapper { position: relative; width: 100vw; height: 60vh; background: #000; display: flex; justify-content: center; align-items: center; overflow: hidden; border-bottom: 2px solid #333; }
-        video { width: 100%; height: 100%; object-fit: cover; }
-        canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
-        #controls { padding: 20px; display: flex; flex-direction: column; align-items: center; gap: 10px; width: 100%; }
-        button { padding: 15px 30px; font-size: 18px; border-radius: 50px; border: none; background: #4CAF50; color: white; font-weight: bold; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.3); width: 80%; max-width: 300px; }
-        #switchBtn { background: #2196F3; display: none; }
-        #status { font-size: 14px; color: #00ff00; margin-top: 5px; text-align: center; padding: 0 10px; }
-        .loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); display: flex; justify-content: center; align-items: center; z-index: 100; flex-direction: column; }
+        body { font-family: sans-serif; margin: 0; background: #121212; color: white; display: flex; flex-direction: column; align-items: center; }
+        #header { padding: 15px; text-align: center; background: #333; width: 100%; }
+        .video-wrapper { position: relative; width: 640px; height: 480px; margin-top: 20px; border: 4px solid #444; }
+        video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+        #status { color: #00ff00; margin-top: 10px; font-weight: bold; }
+        .loading { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; justify-content: center; align-items: center; z-index: 1000; }
     </style>
 </head>
 <body>
 
-    <div id="loadingScreen" class="loading-overlay">
-        <h2 id="loadText">กำลังดาวน์โหลดสมองกล AI...</h2>
-        <p>กรุณารอสักครู่ (BlazeFace Landmarks Ready)</p>
-    </div>
+<div id="loading" class="loading"><h2>กำลังโหลดสมองกลแยกเพศ/วัย...</h2></div>
 
-    <div id="header">
-        <strong>สมองกลน้องนำทาง: ระบบทดสอบ ตา-จมูก-ปาก</strong>
-        <div id="status">รอโหลดโมเดล...</div>
-    </div>
+<div id="header">
+    <strong>ระบบทดสอบวิเคราะห์บุคคล (ชาย/หญิง/เด็ก/คนแก่)</strong>
+    <div id="status">เตรียมความพร้อม...</div>
+</div>
 
-    <div class="video-wrapper">
-        <video id="webcam" autoplay muted playsinline></video>
-        <canvas id="canvas"></canvas>
-    </div>
+<div class="video-wrapper">
+    <video id="video" autoplay muted playsinline></video>
+    <canvas id="canvas"></canvas>
+</div>
 
-    <div id="controls">
-        <button id="startBtn">▶️ เริ่มเปิดกล้องทดสอบ</button>
-        <button id="switchBtn">🔄 สลับกล้องหน้า/หลัง</button>
-    </div>
+<script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const statusText = document.getElementById('status');
+    const loading = document.getElementById('loading');
 
-    <script>
-        const video = document.getElementById('webcam');
-        const canvas = document.getElementById('canvas');
-        const ctx = canvas.getContext('2d');
-        const statusText = document.getElementById('status');
-        const startBtn = document.getElementById('startBtn');
-        const switchBtn = document.getElementById('switchBtn');
-        const loadingScreen = document.getElementById('loadingScreen');
+    // 1. โหลดโมเดลทั้งหมดที่จำเป็น
+    async function init() {
+        const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
         
-        window.faceModel = undefined;
-        window.currentFacingMode = "user"; 
+        await Promise.all([
+            faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+            faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+            faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+            faceapi.nets.ageGenderNet.loadFromUri(MODEL_URL)
+        ]);
 
-        async function loadAI() {
-            try {
-                window.faceModel = await blazeface.load();
-                loadingScreen.style.display = 'none';
-                statusText.innerText = "โมเดลพร้อม! ลองยื่นหน้าเข้ามาครับ";
-            } catch (err) {
-                document.getElementById('loadText').innerText = "โหลด AI ไม่สำเร็จ";
-            }
-        }
-        loadAI();
+        loading.style.display = 'none';
+        statusText.innerText = "โมเดลพร้อมแล้ว! เริ่มเปิดกล้อง...";
+        startVideo();
+    }
 
-        async function startCamera() {
-            startBtn.style.display = 'none';
-            switchBtn.style.display = 'block';
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: window.currentFacingMode, width: 640, height: 480 }
-                });
+    // 2. เริ่มเปิดกล้อง
+    function startVideo() {
+        navigator.mediaDevices.getUserMedia({ video: {} })
+            .then(stream => {
                 video.srcObject = stream;
-                video.onloadedmetadata = () => {
-                    video.play();
-                    canvas.width = video.videoWidth;
-                    canvas.height = video.videoHeight;
-                    predictFrame();
+                video.onplay = () => {
+                    const displaySize = { width: video.videoWidth, height: video.videoHeight };
+                    faceapi.matchDimensions(canvas, displaySize);
+                    
+                    setInterval(async () => {
+                        // 3. ตรวจจับและวิเคราะห์
+                        const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions())
+                            .withFaceLandmarks()
+                            .withAgeAndGender();
+
+                        const resizedDetections = faceapi.resizeResults(detections, displaySize);
+                        const ctx = canvas.getContext('2d');
+                        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                        resizedDetections.forEach(result => {
+                            const { age, gender, genderProbability } = result;
+                            const box = result.detection.box;
+
+                            // แปลผลภาษาไทย
+                            let ageLabel = Math.round(age);
+                            let ageGroup = "ผู้ใหญ่";
+                            if (age < 14) ageGroup = "เด็ก";
+                            else if (age > 55) ageGroup = "ผู้สูงอายุ";
+
+                            let genderTh = (gender === 'male') ? "ชาย" : "หญิง";
+                            
+                            // วาดกรอบ
+                            ctx.strokeStyle = (gender === 'male') ? "#0099ff" : "#ff0099";
+                            ctx.lineWidth = 3;
+                            ctx.strokeRect(box.x, box.y, box.width, box.height);
+
+                            // แสดงข้อความ
+                            ctx.fillStyle = "white";
+                            ctx.font = "bold 20px Arial";
+                            const text = `${genderTh} (${ageGroup}) อายุประมาณ ${ageLabel}`;
+                            ctx.fillText(text, box.x, box.y > 20 ? box.y - 10 : 20);
+
+                            console.log(`🎯 ตรวจพบ: ${genderTh}, อายุ: ${ageLabel}, กลุ่ม: ${ageGroup}`);
+                        });
+                    }, 200); // ทำงานทุกๆ 0.2 วินาที
                 };
-            } catch (err) {
-                statusText.innerText = "Error: " + err.message;
-            }
-        }
+            })
+            .catch(err => statusText.innerText = "ไม่สามารถเปิดกล้องได้: " + err);
+    }
 
-        startBtn.addEventListener('click', startCamera);
-        switchBtn.addEventListener('click', () => {
-            window.currentFacingMode = (window.currentFacingMode === "user") ? "environment" : "user";
-            startCamera();
-        });
-
-        async function predictFrame() {
-            if (!window.faceModel) return;
-
-            const predictions = await window.faceModel.estimateFaces(video, false);
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-            if (predictions.length > 0) {
-                statusText.innerText = `พบใบหน้า: ${predictions.length} คน (พิกัดครบถ้วน)`;
-                
-                predictions.forEach(prediction => {
-                    const start = prediction.topLeft;
-                    const end = prediction.bottomRight;
-                    const size = [end[0] - start[0], end[1] - start[1]];
-                    const centerX = start[0] + (size[0] / 2);
-
-                    // 1. วาดกรอบใบหน้า
-                    ctx.strokeStyle = (centerX > 100 && centerX < 540) ? "#FFD700" : "#00FF41";
-                    ctx.lineWidth = 3;
-                    ctx.strokeRect(start[0], start[1], size[0], size[1]);
-
-                    // 2. วาดจุด Landmarks (ตา จมูก ปาก หู)
-                    const landmarks = prediction.landmarks;
-                    const colors = ["#FF3E3E", "#FF3E3E", "#FFFF00", "#3EFFFF", "#3E3EFF", "#3E3EFF"];
-                    const labels = ["Right Eye", "Left Eye", "Nose", "Mouth", "Right Ear", "Left Ear"];
-
-                    landmarks.forEach((point, index) => {
-                        ctx.fillStyle = colors[index];
-                        ctx.beginPath();
-                        ctx.arc(point[0], point[1], 4, 0, 2 * Math.PI);
-                        ctx.fill();
-                        
-                        // ใส่ชื่อกำกับจุด (เอาออกได้ถ้ามันเกะกะ)
-                        ctx.font = "10px Arial";
-                        ctx.fillText(labels[index], point[0] + 5, point[1]);
-                    });
-
-                    // 3. แสดงค่า Debug ด้านบนกรอบ
-                    ctx.fillStyle = "#00FF41";
-                    ctx.font = "bold 16px sans-serif";
-                    ctx.fillText(`W: ${Math.round(size[0])} CX: ${Math.round(centerX)}`, start[0], start[1] - 10);
-                });
-            } else {
-                statusText.innerText = "กำลังสแกนหาใบหน้าและอวัยวะ...";
-            }
-
-            requestAnimationFrame(predictFrame);
-        }
-    </script>
+    init();
+</script>
 </body>
 </html>
